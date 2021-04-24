@@ -47,6 +47,7 @@ def lazy_disasm(data):
     instruction_len = 0
     not_dword = False
 
+    # Check 4-byte opcode
     try:
         instruction = instruction_map[data]
         instruction_len = len(data)
@@ -54,6 +55,7 @@ def lazy_disasm(data):
         not_dword = True
         pass
 
+    # Check 2-byte opcode
     if not_dword:
         try:
             data = data[:2]
@@ -63,6 +65,19 @@ def lazy_disasm(data):
             log_info("--FAILED to decode")
             pass
     return instruction, instruction_len
+
+def is_conditional_branch(instruction_text):
+    lowered = instruction_text.lower()
+    is_conditional = False
+    if 'eq' in lowered:
+        is_conditional = True
+    elif 'ne' in lowered:
+        is_conditional = True
+    elif 'lt' in lowered:
+        is_conditional = True
+    elif 'gt' in lowered:
+        is_conditional = True
+    return is_conditional
 
 instruction_map = get_instruction_map(objdump_file)
 
@@ -81,6 +96,32 @@ class ObjdumpPlus(Architecture):
 
         result = InstructionInfo()
         result.length = instruction_len
+
+        if len(instruction_text) == 0:
+            return result
+
+        if instruction_text[0].lower() == 'b':
+            tokens = instruction_text.split()
+            token = tokens[1]
+            # Unconditional Branch
+            if all(char in string.hexdigits for char in token):
+                # --HACK: base address offset
+                dest = int('0x' + token, 16) - 0x400000
+                result.add_branch(BranchType.UnconditionalBranch, dest)
+                return result
+            # Conditional Branch
+            if is_conditional_branch(instruction_text):
+                tokens = instruction_text.split()
+                for token in tokens:
+                    csv = token.split(",")
+                    check = csv[-1]
+                    if all(char in string.hexdigits for char in check):
+                        # --HACK: base address offset
+                        dest = int('0x' + check, 16) - 0x400000
+                        result.add_branch(BranchType.TrueBranch, dest)
+                        result.add_branch(BranchType.FalseBranch, addr + instruction_len)
+                        return result
+
         return result
 
     def get_instruction_text(self, data, addr):
